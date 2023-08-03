@@ -6,3 +6,10 @@ available in the app when your plugin is enabled.
 If your plugin does not need CSS, delete this file.
 
 */
+
+.annotation-widget {
+    color: green;
+    font-weight: bold;
+    vertical-align: super;
+    font-size: 0.666em;
+}
