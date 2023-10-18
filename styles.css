@@ -8,8 +8,33 @@ If your plugin does not need CSS, delete this file.
 */
 
 .annotation-widget {
-    color: green;
+    /* color: green; */
+    cursor: pointer;
+    background-color: #2221;
+    border-radius: 3px;
+    padding: 0px 3px;
     /* font-weight: bold; */
     /* vertical-align: super; */
     /* font-size: 0.666em; */
+}
+.annotation-widget.error {
+    background-color: rgb(249, 211, 211);
+}
+
+.markdown-source-view.mod-cm6 span.annotation-widget + img.cm-widgetBuffer,
+.markdown-source-view.mod-cm6 img.cm-widgetBuffer:has(+ span.annotation-widget) {
+    display: none !important;
+}
+
+.kah-annotation-modal .view-header {
+  display: none;
+}
+.kah-annotation-modal .view-content {
+  height: 200px;
+}
+.kah-annotation-modal .cm-scroller {
+  padding: 1rem !important;
+}
+.kah-annotation-modal .modal-close-button {
+  z-index: 99999;
 }

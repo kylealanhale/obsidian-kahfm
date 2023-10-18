@@ -1,4 +1,4 @@
-import { App, editorLivePreviewField, Plugin, PluginSettingTab, Setting } from 'obsidian';
+import { App, editorLivePreviewField, Modal, Plugin, PluginSettingTab, Setting, MarkdownView, WorkspaceLeaf, TFile } from 'obsidian';
 
 
 import { syntaxTree } from "@codemirror/language";
@@ -33,25 +33,10 @@ export default class KAHFM extends Plugin {
         await this.loadSettings();
 
 
-        // This adds a settings tab so the user can configure various aspects of the plugin
+        // This adds a settings tab so the user can configure various aspects of the plugin 
         this.addSettingTab(new KAHFMSettingsTab(this.app, this));
 
         this.registerEditorExtension([inlinePlugin()])
-
-        // this.registerMarkdownPostProcessor((element, context) => {
-        //     const codeblocks = element.querySelectorAll("code");
-      
-        //     for (let index = 0; index < codeblocks.length; index++) {
-        //       const codeblock = codeblocks.item(index);
-        //       const text = codeblock.innerText.trim();
-        //       const isEmoji =
-        //         text[0] === ":" && text[text.length - 1] === ":";
-      
-        //       if (isEmoji) {
-        //         context.addChild(new Emoji(codeblock, text));
-        //       }
-        //     }
-        //   });
     }
 
     onunload() {
@@ -70,14 +55,19 @@ export default class KAHFM extends Plugin {
 
 export class AnnotationWidget extends WidgetType {
     text: string
-    constructor(text: string) {
+    index: number
+    constructor(text: string, index: number) {
         super()
         this.text = text
+        this.index = index
     }
     toDOM(view: EditorView): HTMLElement {
         const el = document.createElement("span");
         el.addClass('annotation-widget')
         el.innerText = this.text;
+        el.onclick = () => {
+            new AnnotationModal(app, this.index).open()
+        }
         return el;
     }
 }
@@ -96,7 +86,6 @@ function selectionAndRangeOverlap(
     return false;
 }
 function inlineRender(view: EditorView) {
-    // still doesn't work as expected for tables and callouts
     if (!view.state.field(editorLivePreviewField)) {
         this.decorations = Decoration.none;
         return;
@@ -106,46 +95,40 @@ function inlineRender(view: EditorView) {
 
     const widgets: Range<Decoration>[] = [];
     const selection = view.state.selection;
-    /* before:
-     *     em for italics
-     *     highlight for highlight
-     * after:
-     *     strong for bold
-     *     strikethrough for strikethrough
-     */
+
     for (const { from, to } of view.visibleRanges) {
         syntaxTree(view.state).iterate({
             from,
             to,
             enter: ({ node }) => {
+                // Find the curly brackets
+                const nextCharIsBracket = view.state.doc.sliceString(node.to + 1, node.to + 2) == "{"
                 const closingBracketIndex = view.state.doc.sliceString(node.to + 1).indexOf("}") + node.to + 2
+                const isBareLink = node.type.name == "hmd-barelink_link" && nextCharIsBracket
+
                 const start = node.from - 1
                 const end = closingBracketIndex
-                if (selectionAndRangeOverlap(selection, start, end)) return;
+                if (selectionAndRangeOverlap(selection, start, end) || !isBareLink) return;
+
                 const text = view.state.doc.sliceString(node.from, node.to)
+                const matchResult = view.state.doc.sliceString(node.to, closingBracketIndex)
+                    .match(/annotation=(\d+)/);
+                const index = matchResult ? Number(matchResult[1]) : undefined
 
-                // console.log('node', node, node.type.name, node.from + 1, node.to + 1);
-                const nextCharIsBracket = view.state.doc.sliceString(node.to + 1, node.to + 2) == "{"
-                if (node.type.name == "hmd-barelink_link" && nextCharIsBracket) {
-                    const text = view.state.doc.sliceString(node.from, node.to)
-                    // Find where the next closing curly bracket is
-                    const closingBracketIndex = view.state.doc.sliceString(node.to + 1).indexOf("}") + node.to + 2
-                    widgets.push(
-                        Decoration.replace({
-                            inclusive: false,
+                if (index) widgets.push(
+                    Decoration.replace({
+                        inclusive: false,
 
-                        }).range(node.from - 1, node.from),
-                        Decoration.replace({
-                            inclusive: false,
+                    }).range(node.from - 1, node.from),
+                    Decoration.replace({
+                        inclusive: false,
 
-                        }).range(node.to, node.to + 2),
-                        Decoration.replace({ 
-                            widget: new AnnotationWidget(text),
-                            inclusive: true,
-                        }).range(start, end)
-                    );
-                }
-
+                    }).range(node.to, node.to + 2),
+                    Decoration.replace({
+                        widget: new AnnotationWidget(text, index),
+                        inclusive: true,
+                    }).range(start, end)
+                );
             }
         });
     }
@@ -209,4 +192,49 @@ class KAHFMSettingsTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 }));
     }
+}
+
+class AnnotationModal extends Modal {
+    app: App
+    index: number
+    markdownView: MarkdownView
+
+    constructor(app: App, index: number) {
+        super(app);
+        this.app = app
+        this.index = index
+    }
+
+    async onOpen() {
+        //@ts-ignore
+        let markdownView = this.markdownView = new MarkdownView(new WorkspaceLeaf(this.app))
+        //@ts-ignore
+        markdownView.setMode(markdownView.editMode)
+        this.contentEl.appendChild(markdownView.containerEl);
+        this.contentEl.addClass('kah-annotation-modal')
+
+        await this.load()
+        markdownView.editor.focus()
+        markdownView.editor.setCursor({ line: 99999, ch: 99999 })
+    }
+
+    async onClose() {
+        await this.save()
+        this.contentEl.empty();
+    }
+
+    async load() {
+        await app.fileManager.processFrontMatter(this.app.workspace.getActiveFile() as TFile, (frontmatter) => {
+            const annotations = frontmatter.annotations
+            const text = annotations && annotations[this.index] ? annotations[this.index] : ''
+            this.markdownView.setViewData(text, true);
+        })
+    }
+
+    async save() {
+        app.fileManager.processFrontMatter(this.app.workspace.getActiveFile() as TFile, (frontmatter) => {
+            frontmatter.annotations[this.index] = this.markdownView.getViewData()
+        })
+    }
+
 }
